@@ -31,6 +31,7 @@ public:
 private:
     int n_;
     std::vector<std::vector<int>> prefA_;  // group A preferences
+    std::vector<std::vector<int>> rankA_;  // group A: rank[i][j] = rank of B-person j for A-person i
     std::vector<std::vector<int>> rankB_;  // group B: rank[j][i] = rank of A-person i for B-person j
 
     std::vector<int> matchA_;

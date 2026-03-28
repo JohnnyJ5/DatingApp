@@ -24,6 +24,7 @@
 #include "src/blossom.h"
 
 #include <algorithm>
+#include <cassert>
 #include <iomanip>
 #include <iostream>
 #include <numeric>
@@ -34,7 +35,7 @@
 
 static const std::vector<std::string> MEN   = {"Aaron", "Ben", "Carlos", "Dan", "Evan", "Frank"};
 static const std::vector<std::string> WOMEN = {"Amy",   "Beth", "Clara",  "Dana", "Elena", "Fiona"};
-static const int N = 6;
+static const int N = static_cast<int>(MEN.size());
 
 // Compatibility threshold used by Hopcroft-Karp and Blossom.
 static const int THRESHOLD = 65;
@@ -226,6 +227,10 @@ static void analysis(const std::vector<int>& gs,
 // ── main ──────────────────────────────────────────────────────────────────────
 
 int main() {
+    assert(static_cast<int>(MEN.size())   == N);
+    assert(static_cast<int>(WOMEN.size()) == N);
+    assert(static_cast<int>(COMPAT.size()) == N);
+
     separator();
     std::cout << "  Blind Dating Algorithm Analysis\n";
     std::cout << "  " << N << " men  x  " << N << " women  |  "

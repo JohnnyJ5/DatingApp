@@ -67,7 +67,7 @@ void Hungarian::solve() {
         } while (j0);
     }
 
-    assignment_.resize(n_);
+    assignment_.assign(n_, -1);
     for (int j = 1; j <= n_; ++j)
         if (p[j] != 0)
             assignment_[p[j] - 1] = j - 1;

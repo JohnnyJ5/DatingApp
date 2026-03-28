@@ -11,9 +11,11 @@
 #include <iostream>
 #include <vector>
 
+static int failures = 0;
+
 static void check(const char* name, bool cond) {
     std::cout << (cond ? "[PASS] " : "[FAIL] ") << name << "\n";
-    assert(cond);
+    if (!cond) ++failures;
 }
 
 // Validates that no two men are matched to the same woman.
@@ -119,6 +121,9 @@ int main() {
     test_fully_compatible_pool();
     test_more_women_than_men();
     test_augmenting_path_needed();
-    std::cout << "All Hopcroft-Karp tests passed.\n";
-    return 0;
+    if (failures > 0)
+        std::cout << failures << " Hopcroft-Karp test(s) FAILED.\n";
+    else
+        std::cout << "All Hopcroft-Karp tests passed.\n";
+    return failures > 0 ? 1 : 0;
 }

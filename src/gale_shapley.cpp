@@ -9,6 +9,15 @@ GaleShapley::GaleShapley(const std::vector<std::vector<int>>& groupAPrefs,
 {
     assert(static_cast<int>(groupBPrefs.size()) == n_);
 
+    // Pre-compute rank tables for group A so isStable() checks are O(1).
+    rankA_.assign(n_, std::vector<int>(n_, 0));
+    for (int i = 0; i < n_; ++i) {
+        assert(static_cast<int>(groupAPrefs[i].size()) == n_);
+        for (int rank = 0; rank < n_; ++rank) {
+            rankA_[i][groupAPrefs[i][rank]] = rank;
+        }
+    }
+
     // Pre-compute rank tables for group B so acceptability checks are O(1).
     rankB_.assign(n_, std::vector<int>(n_, 0));
     for (int j = 0; j < n_; ++j) {
@@ -58,23 +67,21 @@ void GaleShapley::run() {
 }
 
 bool GaleShapley::isStable() const {
+    assert(!matchA_.empty() && "isStable() called before run()");
+
     // For every (a, b) pair that isn't matched, check that neither would both
     // prefer each other over their current partners.
     for (int a = 0; a < n_; ++a) {
+        if (matchA_[a] == -1) continue;  // a is unmatched — skip
         for (int b = 0; b < n_; ++b) {
             if (matchA_[a] == b) continue;
+            if (matchB_[b] == -1) continue;  // b is unmatched — can't form a blocking pair
 
-            // Does a prefer b over matchA_[a]?
-            bool aPrefersB = false;
-            for (int k : prefA_[a]) {
-                if (k == b)          { aPrefersB = true;  break; }
-                if (k == matchA_[a]) { aPrefersB = false; break; }
-            }
-            if (!aPrefersB) continue;
+            // Does a prefer b over matchA_[a]?  (O(1) via rank table)
+            if (rankA_[a][b] >= rankA_[a][matchA_[a]]) continue;
 
             // Does b prefer a over matchB_[b]?
-            bool bPrefersA = rankB_[b][a] < rankB_[b][matchB_[b]];
-            if (bPrefersA) return false;  // blocking pair found
+            if (rankB_[b][a] < rankB_[b][matchB_[b]]) return false;  // blocking pair found
         }
     }
     return true;

@@ -10,9 +10,11 @@
 #include <iostream>
 #include <vector>
 
+static int failures = 0;
+
 static void check(const char* name, bool cond) {
     std::cout << (cond ? "[PASS] " : "[FAIL] ") << name << "\n";
-    assert(cond);
+    if (!cond) ++failures;
 }
 
 // 2 men, 2 women — classic base case with a known stable outcome.
@@ -144,6 +146,9 @@ int main() {
     test_all_men_prefer_same_woman();
     test_rerun_is_idempotent();
     test_no_man_can_do_better();
-    std::cout << "All Gale-Shapley tests passed.\n";
-    return 0;
+    if (failures > 0)
+        std::cout << failures << " Gale-Shapley test(s) FAILED.\n";
+    else
+        std::cout << "All Gale-Shapley tests passed.\n";
+    return failures > 0 ? 1 : 0;
 }

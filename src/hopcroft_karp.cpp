@@ -7,7 +7,8 @@ HopcroftKarp::HopcroftKarp(int leftSize, int rightSize)
       adj_(leftSize),
       matchLeft_(leftSize, -1),
       matchRight_(rightSize, -1),
-      distLeft_(leftSize)
+      distLeft_(leftSize),
+      iter_(leftSize, 0)
 {}
 
 void HopcroftKarp::addCompatiblePair(int a, int b) {
@@ -43,7 +44,8 @@ bool HopcroftKarp::bfs() {
 }
 
 bool HopcroftKarp::dfs(int a) {
-    for (int b : adj_[a]) {
+    for (int& i = iter_[a]; i < static_cast<int>(adj_[a].size()); ++i) {
+        int b  = adj_[a][i];
         int a2 = matchRight_[b];
         if (a2 == -1 || (distLeft_[a2] == distLeft_[a] + 1 && dfs(a2))) {
             matchLeft_[a]  = b;
@@ -61,6 +63,7 @@ int HopcroftKarp::maxMatching() {
 
     int matching = 0;
     while (bfs()) {
+        iter_.assign(left_, 0);
         for (int a = 0; a < left_; ++a)
             if (matchLeft_[a] == -1 && dfs(a))
                 ++matching;

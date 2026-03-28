@@ -15,14 +15,6 @@ void Blossom::addCompatiblePair(int a, int b) {
     adj_[b].push_back(a);
 }
 
-int Blossom::findRoot(std::vector<int>& parent, int v) {
-    while (parent[v] != v) {
-        parent[v] = parent[parent[v]];  // path compression
-        v = parent[v];
-    }
-    return v;
-}
-
 // Gabow's simple O(V·E) blossom augmentation.
 // For each free vertex, we run a single BFS that:
 //  - labels vertices as EVEN (reachable via alternating path of even length from s)

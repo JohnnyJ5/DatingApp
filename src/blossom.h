@@ -28,8 +28,4 @@ private:
     // Augment along a path found from source vertex s.
     // Returns true if an augmenting path was found.
     bool augment(int s);
-
-    // Find the root of vertex v in the union-find structure used for blossom
-    // contraction.
-    int findRoot(std::vector<int>& parent, int v);
 };

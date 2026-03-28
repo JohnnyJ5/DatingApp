@@ -21,7 +21,7 @@ public:
     const std::vector<int>& getMatching() const { return matchLeft_; }
 
 private:
-    static constexpr int INF = 1e9;
+    static constexpr int INF = 1'000'000'000;
 
     int left_, right_;
     std::vector<std::vector<int>> adj_;   // adjacency list for left vertices
@@ -29,6 +29,7 @@ private:
     std::vector<int> matchLeft_;   // matchLeft[a]  = b or -1
     std::vector<int> matchRight_;  // matchRight[b] = a or -1
     std::vector<int> distLeft_;    // BFS distance for left vertices
+    std::vector<int> iter_;        // current-edge pointer for DFS (reset each phase)
 
     bool bfs();
     bool dfs(int a);

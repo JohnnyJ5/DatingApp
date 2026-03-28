@@ -12,9 +12,11 @@
 #include <iostream>
 #include <vector>
 
+static int failures = 0;
+
 static void check(const char* name, bool cond) {
     std::cout << (cond ? "[PASS] " : "[FAIL] ") << name << "\n";
-    assert(cond);
+    if (!cond) ++failures;
 }
 
 // Validates that the matching vector is self-consistent (symmetric and valid).
@@ -131,6 +133,9 @@ int main() {
     test_more_women_than_men();
     test_augmenting_path_required();
     test_single_compatible_pair();
-    std::cout << "All Blossom tests passed.\n";
-    return 0;
+    if (failures > 0)
+        std::cout << failures << " Blossom test(s) FAILED.\n";
+    else
+        std::cout << "All Blossom tests passed.\n";
+    return failures > 0 ? 1 : 0;
 }

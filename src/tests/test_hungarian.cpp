@@ -11,9 +11,11 @@
 #include <iostream>
 #include <vector>
 
+static int failures = 0;
+
 static void check(const char* name, bool cond) {
     std::cout << (cond ? "[PASS] " : "[FAIL] ") << name << "\n";
-    assert(cond);
+    if (!cond) ++failures;
 }
 
 // Verifies that the reported score equals the sum of assigned pair scores.
@@ -137,6 +139,9 @@ int main() {
     test_four_couples();
     test_uniform_compatibility();
     test_rerun_idempotent();
-    std::cout << "All Hungarian tests passed.\n";
-    return 0;
+    if (failures > 0)
+        std::cout << failures << " Hungarian test(s) FAILED.\n";
+    else
+        std::cout << "All Hungarian tests passed.\n";
+    return failures > 0 ? 1 : 0;
 }
