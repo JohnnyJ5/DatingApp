@@ -1,64 +1,29 @@
-CXX      := g++
-CXXFLAGS := -std=c++17 -Wall -Wextra -O2
 BUILD    := build
-
-# Crow + standalone Asio (bundled under third_party/) + pthreads
-CROW_FLAGS := -I. -Ithird_party -lpthread
-
-# ── Algorithm object files ────────────────────────────────────────────────────
-ALGO_SRCS := src/gale_shapley.cpp \
-             src/hopcroft_karp.cpp \
-             src/hungarian.cpp \
-             src/blossom.cpp
-ALGO_OBJS := $(patsubst src/%.cpp, $(BUILD)/%.o, $(ALGO_SRCS))
 
 # ── Top-level targets ─────────────────────────────────────────────────────────
 DOCKER_IMAGE := matching-algorithm
 DOCKER_NAME  := matching-algorithm
 
-.PHONY: all tests run_tests run run_server clean \
-        docker-build docker-start docker-stop
-
-all: $(BUILD)/main tests $(BUILD)/server
-
-# ── Main driver ───────────────────────────────────────────────────────────────
-$(BUILD)/main: main.cpp $(ALGO_OBJS) | $(BUILD)
-	$(CXX) $(CXXFLAGS) -I. $^ -o $@
-
-# ── Unit tests ────────────────────────────────────────────────────────────────
 TEST_BINS := $(BUILD)/test_gale_shapley \
              $(BUILD)/test_hopcroft_karp \
              $(BUILD)/test_hungarian \
              $(BUILD)/test_blossom
 
-tests: $(TEST_BINS)
+.PHONY: all tests run_tests run run_server clean \
+        docker-build docker-start docker-stop
 
-$(BUILD)/test_gale_shapley: src/tests/test_gale_shapley.cpp $(BUILD)/gale_shapley.o | $(BUILD)
-	$(CXX) $(CXXFLAGS) -Isrc $^ -o $@
+all: _cmake
+	cmake --build $(BUILD) --parallel
 
-$(BUILD)/test_hopcroft_karp: src/tests/test_hopcroft_karp.cpp $(BUILD)/hopcroft_karp.o | $(BUILD)
-	$(CXX) $(CXXFLAGS) -Isrc $^ -o $@
-
-$(BUILD)/test_hungarian: src/tests/test_hungarian.cpp $(BUILD)/hungarian.o | $(BUILD)
-	$(CXX) $(CXXFLAGS) -Isrc $^ -o $@
-
-$(BUILD)/test_blossom: src/tests/test_blossom.cpp $(BUILD)/blossom.o | $(BUILD)
-	$(CXX) $(CXXFLAGS) -Isrc $^ -o $@
-
-# ── Compile algorithm objects ─────────────────────────────────────────────────
-$(BUILD)/%.o: src/%.cpp | $(BUILD)
-	$(CXX) $(CXXFLAGS) -Isrc -c $< -o $@
-
-# ── REST API Server (Crow) ────────────────────────────────────────────────────
-$(BUILD)/server: server/server.cpp $(ALGO_OBJS) | $(BUILD)
-	$(CXX) $(CXXFLAGS) $(CROW_FLAGS) -Isrc $^ -o $@
-
-run_server: $(BUILD)/server
-	./$(BUILD)/server
+tests: _cmake
+	cmake --build $(BUILD) --parallel --target test_gale_shapley test_hopcroft_karp test_hungarian test_blossom
 
 # ── Run main driver ───────────────────────────────────────────────────────────
-run: $(BUILD)/main
+run: all
 	./$(BUILD)/main
+
+run_server: all
+	./$(BUILD)/server
 
 # ── Run all tests ─────────────────────────────────────────────────────────────
 run_tests: tests
@@ -68,7 +33,12 @@ run_tests: tests
 	    echo; \
 	done
 
-# ── Utility ───────────────────────────────────────────────────────────────────
+# ── Configure (run once, or when CMakeLists.txt changes) ─────────────────────
+_cmake: | $(BUILD)
+	@if [ ! -f $(BUILD)/CMakeCache.txt ]; then \
+	    cmake -S . -B $(BUILD); \
+	fi
+
 $(BUILD):
 	mkdir -p $(BUILD)
 
