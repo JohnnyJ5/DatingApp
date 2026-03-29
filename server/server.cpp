@@ -650,7 +650,7 @@ int main()
     });
 
     // ── Start server ──────────────────────────────────────────────────────────
-    std::cout << "Blind Dating API server listening on http://localhost:8080\n";
-    app.port(8080).multithreaded().run();
+    std::cout << "Blind Dating API server listening on http://localhost:9090\n";
+    app.port(9090).multithreaded().run();
     return 0;
 }
