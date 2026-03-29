@@ -4,63 +4,83 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Build & Run
 
+All commands run inside the Docker dev container. The `dev` service bind-mounts the project root at `/app`, so build artifacts land in `./build/` on the host.
+
 ```bash
-# Build everything (main driver + all test binaries)
-make
+# Build everything (main driver + server + all test binaries)
+make all
 
-# Build only the main driver
-make build/main
-
-# Run the main driver (blind dating comparative analysis)
+# Build and run the CLI comparative analysis
 make run
+
+# Start the web server (production image, port 9090)
+make run_server       # foreground via docker compose up app
+make docker-start     # detached; server at http://localhost:9090
+make docker-stop
 
 # Build and run all unit tests
 make run_tests
 
 # Run a single test binary
-./build/test_gale_shapley
-./build/test_hopcroft_karp
-./build/test_hungarian
-./build/test_blossom
+docker compose run --rm dev ./build/test_gale_shapley
 
-# Clean
+# Clean build artifacts
 make clean
 ```
 
-**Requirements:** C++17, `g++`
+**Requirements:** Docker with Compose plugin.
+
+The Dockerfile has three stages: `dev` (toolchain only, used by the `dev` service), `builder` (copies source and compiles, used for CI), and `runtime` (server binary + static files only, used by the `app` service).
 
 ## Architecture
 
-All algorithm implementations live in `src/`. There is no CMake integration in active use — the `Makefile` is the build system.
+The project has two entry points sharing one algorithm library:
+
+- **`main.cpp`** — CLI tool that runs all four algorithms on a hardcoded 6×6 dataset and prints a side-by-side comparison.
+- **`server/server.cpp`** — Crow-based REST API + single-page web UI ("Spark") that exposes the same algorithms over HTTP on port 9090.
+
+Both duplicate the same 6×6 `COMPAT[man][woman]` score matrix and the same preference-building logic (sort columns descending to derive ordinal rankings from raw scores). When a database is added, this is the place to replace with queries.
 
 ### Source Layout
 
 ```
-src/
-  gale_shapley.{h,cpp}    — Module 1: Stable Matching (Gale-Shapley)
-  hopcroft_karp.{h,cpp}   — Module 2a: Maximum Bipartite Matching (Hopcroft-Karp)
-  hungarian.{h,cpp}        — Module 2b: Optimal Assignment (Hungarian Algorithm)
-  blossom.{h,cpp}          — Module 3: General Graph Matching (Edmonds' Blossom)
-  tests/
-    test_gale_shapley.cpp
-    test_hopcroft_karp.cpp
-    test_hungarian.cpp
-    test_blossom.cpp
-main.cpp                   — Comparative analysis driver (blind dating scenario)
+src/                              — Algorithm static library (libalgoritms.a)
+  gale_shapley.{h,cpp}            — Stable Matching
+  hopcroft_karp.{h,cpp}           — Maximum Bipartite Matching
+  hungarian.{h,cpp}               — Optimal Assignment
+  blossom.{h,cpp}                 — General Graph Matching
+  tests/                          — One test binary per algorithm
+main.cpp                          — CLI comparative analysis driver
+server/
+  server.cpp                      — REST API (Crow framework, ~656 lines)
+  static/index.html               — Single-page app (embedded CSS + JS)
+  BRANDING.md                     — UI design system reference
 ```
 
 ### Module Summary
 
 | Class | Input | Output | Guarantee |
 |---|---|---|---|
-| `GaleShapley` | Two ranked preference lists (same size n) | `matchA[i] = j` | Stable, proposer-optimal |
-| `HopcroftKarp` | Bipartite graph (two groups, compatible pairs as edges) | `match[a] = b`, -1 if unmatched | Maximum cardinality |
-| `Hungarian` | n×n compatibility score matrix | `assignment[i] = j` | Globally optimal total score |
-| `Blossom` | General graph (single vertex set, undirected edges) | `match[i] = j`, -1 if unmatched | Maximum cardinality, handles odd cycles |
+| `GaleShapley` | Two ranked preference lists (size n) | `matchA[i] = j` | Stable, proposer-optimal |
+| `HopcroftKarp` | Bipartite graph (edges where score ≥ threshold) | `match[a] = b`, -1 if unmatched | Maximum cardinality |
+| `Hungarian` | n×n score matrix | `assignment[i] = j` | Globally optimal total score |
+| `Blossom` | General graph (undirected edges) | `match[i] = j`, -1 if unmatched | Maximum cardinality, handles odd cycles |
+
+All four algorithms output the same shape: `vector<int>` where `result[i] = j` (matched) or `-1` (unmatched). This uniform interface is what makes `main.cpp`'s side-by-side comparison and `server.cpp`'s `matchesToJson()` helper straightforward.
 
 ### Key Design Decisions
 
-- **`GaleShapley`** stores group B preferences as a rank lookup table (`rankB_[j][i]`) rather than a preference list, giving O(1) comparison during proposals.
-- **`Blossom`** uses union-find for blossom contraction. Men/women are encoded as vertices 0..N-1 and N..2N-1 respectively when used on bipartite data; the caller translates indices back (see `main.cpp:runBlossom()`).
-- All four algorithms are exercised in `main.cpp` on the same 6×6 compatibility dataset and their results compared side-by-side.
-- The `build/` directory (gitignored) is flat — all object files and test binaries land directly in `build/`, not in subdirectories.
+- **`GaleShapley`** pre-computes rank lookup tables (`rankA_[i][j]`, `rankB_[j][i]`) so preference comparisons during proposals are O(1) rather than O(n).
+- **`Blossom` on bipartite data**: The caller encodes men as vertices `0..N-1` and women as `N..2N-1`, then translates back after the run: `blossom.getMatching()[m] - N` gives the woman index. See `runBlossom()` in both `main.cpp` and `server.cpp`.
+- **`Hungarian`** negates scores internally (minimizes cost = maximizes score). The `maxScore_` field is the true maximum.
+- Algorithms are stateless at construction and safe to re-run; each `.run()` / `.solve()` / `.maxMatching()` call re-initializes internal state.
+- Crow is fetched at configure time via CMake `FetchContent` (v1.2.1). No vendored dependencies in the repo.
+
+### Build System
+
+CMake is the build system; the `Makefile` is a thin wrapper that delegates to `docker compose run --rm dev`. Root `CMakeLists.txt` fetches Crow and adds two subdirectories:
+
+- `src/CMakeLists.txt` → static lib `algorithms` + 4 test executables
+- `server/CMakeLists.txt` → `server` executable (links `algorithms` + Crow)
+
+`main.cpp` is built directly from the root `CMakeLists.txt` and links `algorithms`.
