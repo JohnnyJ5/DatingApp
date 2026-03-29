@@ -2,7 +2,9 @@
 FROM debian:bookworm-slim AS dev
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
         g++ \
+        git \
         make \
         cmake \
         libasio-dev \

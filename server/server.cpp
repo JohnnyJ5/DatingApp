@@ -44,7 +44,7 @@
 //    POST /api/messages/:matchId   Send a message to a matched partner
 // ============================================================================
 
-#include "crow/crow_all.h"
+#include "crow.h"
 
 #include "../src/gale_shapley.h"
 #include "../src/hopcroft_karp.h"

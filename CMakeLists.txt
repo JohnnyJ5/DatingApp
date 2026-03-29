@@ -17,7 +17,7 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(Crow)
 
 add_subdirectory(src)
-add_subdirectory(server)
+add_subdirectory(server server_build)
 
 # ── Main driver ───────────────────────────────────────────────────────────────
 add_executable(main main.cpp)

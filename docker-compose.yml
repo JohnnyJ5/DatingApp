@@ -22,6 +22,7 @@ services:
       target: dev
     volumes:
       - .:/app
+      - dev_build:/app/build   # isolated from host build/ to avoid CMakeCache path conflicts
 
   # db:
   #   image: postgres:16-alpine
@@ -37,5 +38,6 @@ services:
   #     timeout: 5s
   #     retries: 5
 
-# volumes:
-#   db_data:
+volumes:
+  dev_build:
+  # db_data:
