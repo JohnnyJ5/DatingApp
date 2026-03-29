@@ -2,6 +2,9 @@ CXX      := g++
 CXXFLAGS := -std=c++17 -Wall -Wextra -O2
 BUILD    := build
 
+# Crow + standalone Asio (bundled under third_party/) + pthreads
+CROW_FLAGS := -I. -Ithird_party -lpthread
+
 # ── Algorithm object files ────────────────────────────────────────────────────
 ALGO_SRCS := src/gale_shapley.cpp \
              src/hopcroft_karp.cpp \
@@ -10,9 +13,9 @@ ALGO_SRCS := src/gale_shapley.cpp \
 ALGO_OBJS := $(patsubst src/%.cpp, $(BUILD)/%.o, $(ALGO_SRCS))
 
 # ── Top-level targets ─────────────────────────────────────────────────────────
-.PHONY: all tests run_tests run clean
+.PHONY: all tests run_tests run run_server clean
 
-all: $(BUILD)/main tests
+all: $(BUILD)/main tests $(BUILD)/server
 
 # ── Main driver ───────────────────────────────────────────────────────────────
 $(BUILD)/main: main.cpp $(ALGO_OBJS) | $(BUILD)
@@ -41,6 +44,13 @@ $(BUILD)/test_blossom: src/tests/test_blossom.cpp $(BUILD)/blossom.o | $(BUILD)
 # ── Compile algorithm objects ─────────────────────────────────────────────────
 $(BUILD)/%.o: src/%.cpp | $(BUILD)
 	$(CXX) $(CXXFLAGS) -Isrc -c $< -o $@
+
+# ── REST API Server (Crow) ────────────────────────────────────────────────────
+$(BUILD)/server: server/server.cpp $(ALGO_OBJS) | $(BUILD)
+	$(CXX) $(CXXFLAGS) $(CROW_FLAGS) -Isrc $^ -o $@
+
+run_server: $(BUILD)/server
+	./$(BUILD)/server
 
 # ── Run main driver ───────────────────────────────────────────────────────────
 run: $(BUILD)/main
