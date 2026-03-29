@@ -1,63 +1,47 @@
-BUILD    := build
+BUILD   := build
+DC_RUN  := docker compose run --rm dev
 
-# ── Top-level targets ─────────────────────────────────────────────────────────
-DOCKER_IMAGE := matching-algorithm
-DOCKER_NAME  := matching-algorithm
-
-TEST_BINS := $(BUILD)/test_gale_shapley \
-             $(BUILD)/test_hopcroft_karp \
-             $(BUILD)/test_hungarian \
-             $(BUILD)/test_blossom
+# cmake configure + build in one shot (skips configure if already done)
+CMAKE_BUILD = [ -f $(BUILD)/CMakeCache.txt ] || cmake -S . -B $(BUILD); cmake --build $(BUILD) --parallel
 
 .PHONY: all tests run_tests run run_server clean \
-        docker-build docker-start docker-stop
+        docker-build docker-start docker-stop docker-logs
 
-all: _cmake
-	cmake --build $(BUILD) --parallel
+# ── Build ─────────────────────────────────────────────────────────────────────
+all:
+	$(DC_RUN) sh -c '$(CMAKE_BUILD)'
 
-tests: _cmake
-	cmake --build $(BUILD) --parallel --target test_gale_shapley test_hopcroft_karp test_hungarian test_blossom
+tests:
+	$(DC_RUN) sh -c '$(CMAKE_BUILD) --target test_gale_shapley test_hopcroft_karp test_hungarian test_blossom'
 
-# ── Run main driver ───────────────────────────────────────────────────────────
-run: all
-	./$(BUILD)/main
+# ── Run ───────────────────────────────────────────────────────────────────────
+run:
+	$(DC_RUN) sh -c '$(CMAKE_BUILD) && ./$(BUILD)/main'
 
-run_server: all
-	./$(BUILD)/server
+run_server:
+	docker compose up app
 
-# ── Run all tests ─────────────────────────────────────────────────────────────
-run_tests: tests
-	@for t in $(TEST_BINS); do \
-	    echo "--- $$t ---"; \
-	    ./$$t; \
-	    echo; \
-	done
+# ── Test ──────────────────────────────────────────────────────────────────────
+run_tests:
+	$(DC_RUN) sh -c '$(CMAKE_BUILD) --target test_gale_shapley test_hopcroft_karp test_hungarian test_blossom && \
+	    for t in $(BUILD)/test_gale_shapley $(BUILD)/test_hopcroft_karp $(BUILD)/test_hungarian $(BUILD)/test_blossom; do \
+	        echo "--- $$t ---"; ./$$t; echo; \
+	    done'
 
-# ── Configure (run once, or when CMakeLists.txt changes) ─────────────────────
-_cmake: | $(BUILD)
-	@if [ ! -f $(BUILD)/CMakeCache.txt ]; then \
-	    cmake -S . -B $(BUILD); \
-	fi
-
-$(BUILD):
-	mkdir -p $(BUILD)
-
+# ── Clean ─────────────────────────────────────────────────────────────────────
 clean:
-	rm -rf $(BUILD)
+	$(DC_RUN) rm -rf $(BUILD)
 
-# ── Docker ────────────────────────────────────────────────────────────────────
+# ── Docker Compose ────────────────────────────────────────────────────────────
 docker-build:
-	docker build -t $(DOCKER_IMAGE) .
+	docker compose build
 
 docker-start:
-	@if docker ps -aq -f name=^$(DOCKER_NAME)$$ | grep -q .; then \
-	    docker stop $(DOCKER_NAME); \
-	    docker start $(DOCKER_NAME); \
-	else \
-	    $(MAKE) docker-build; \
-	    docker run -d --name $(DOCKER_NAME) -p 9090:9090 $(DOCKER_IMAGE); \
-	fi
+	docker compose up -d --build
 	@echo "Server running at http://localhost:9090"
 
 docker-stop:
-	docker stop $(DOCKER_NAME)
+	docker compose down
+
+docker-logs:
+	docker compose logs -f

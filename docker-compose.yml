@@ -1,0 +1,41 @@
+services:
+  app:
+    build:
+      context: .
+      target: runtime
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
+    # environment:
+    #   - DB_HOST=db
+    #   - DB_PORT=5432
+    #   - DB_NAME=matching
+    #   - DB_USER=matching
+    #   - DB_PASSWORD=matching
+    # depends_on:
+    #   db:
+    #     condition: service_healthy
+
+  dev:
+    build:
+      context: .
+      target: dev
+    volumes:
+      - .:/app
+
+  # db:
+  #   image: postgres:16-alpine
+  #   environment:
+  #     POSTGRES_DB: matching
+  #     POSTGRES_USER: matching
+  #     POSTGRES_PASSWORD: matching
+  #   volumes:
+  #     - db_data:/var/lib/postgresql/data
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U matching"]
+  #     interval: 5s
+  #     timeout: 5s
+  #     retries: 5
+
+# volumes:
+#   db_data:

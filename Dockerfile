@@ -1,5 +1,5 @@
-# ── Build stage ───────────────────────────────────────────────────────────────
-FROM debian:bookworm-slim AS builder
+# ── Dev stage (toolchain only; source bind-mounted at runtime) ─────────────────
+FROM debian:bookworm-slim AS dev
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         g++ \
@@ -10,13 +10,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
+# ── Builder stage (CI / production image) ─────────────────────────────────────
+FROM dev AS builder
+
 COPY . .
 
-# Always build from scratch inside the container to avoid stale host artefacts
 RUN cmake -S . -B build && cmake --build build --parallel
 
 # ── Runtime stage ─────────────────────────────────────────────────────────────
-FROM debian:bookworm-slim
+FROM debian:bookworm-slim AS runtime
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libstdc++6 \

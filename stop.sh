@@ -1,3 +1,3 @@
 #!/usr/bin/env bash
 set -euo pipefail
-make docker-stop
+docker compose down

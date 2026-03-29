@@ -1,3 +1,4 @@
 #!/usr/bin/env bash
 set -euo pipefail
-make docker-start
+docker compose up -d --build
+echo "Server running at http://localhost:9090"
