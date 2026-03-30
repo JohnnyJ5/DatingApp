@@ -651,8 +651,8 @@ int main()
 
     // ── Start server ──────────────────────────────────────────────────────────
     const char* port_env = std::getenv("PORT");
-    uint16_t port = port_env ? static_cast<uint16_t>(std::stoi(port_env)) : 9090;
-    std::cout << "Blind Dating API server listening on port " << port << "\n";
-    app.port(port).multithreaded().run();
+    uint16_t port = port_env ? static_cast<uint16_t>(std::stoi(port_env)) : 8081;
+    std::cout << "Blind Dating API server listening on 0.0.0.0:" << port << "\n";
+    app.port(port).bindaddr("0.0.0.0").multithreaded().run();
     return 0;
 }
