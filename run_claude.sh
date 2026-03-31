@@ -13,6 +13,12 @@ DOCKER_COMMON=(
 
 if [ "$(docker ps -q -f name=^${CONTAINER_NAME}$)" ]; then
     echo "Container '${CONTAINER_NAME}' is already running. Logging you into bash..."
+    echo "Updating dotfiles..."
+    docker run --rm "${DOCKER_COMMON[@]}" claude-cli-env bash -c "
+        cd /app/.claude_config/dotfiles &&
+        git pull origin main &&
+        ./install.sh
+    "
     docker exec -it ${CONTAINER_NAME} bash
 else
     echo "Starting a new '${CONTAINER_NAME}' container..."
@@ -35,14 +41,7 @@ else
             cd /app/.claude_config/dotfiles &&
             ./install.sh
         "
-    else
-        echo "Updating dotfiles..."
-        docker run --rm "${DOCKER_COMMON[@]}" claude-cli-env bash -c "
-            cd /app/.claude_config/dotfiles &&
-            git pull origin main &&
-            ./install.sh
-        "
     fi
 
-    docker run --rm -it --name ${CONTAINER_NAME} "${DOCKER_COMMON[@]}" claude-cli-env
+    docker run --rm -it --name ${CONTAINER_NAME} "${DOCKER_COMMON[@]}" claude-cli-env bash -c "source /app/.claude_config/dotfiles/.bashrc"
 fi
