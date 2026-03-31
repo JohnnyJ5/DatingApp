@@ -35,6 +35,13 @@ else
             cd /app/.claude_config/dotfiles &&
             ./install.sh
         "
+    else
+        echo "Updating dotfiles..."
+        docker run --rm "${DOCKER_COMMON[@]}" claude-cli-env bash -c "
+            cd /app/.claude_config/dotfiles &&
+            git pull origin main &&
+            ./install.sh
+        "
     fi
 
     docker run --rm -it --name ${CONTAINER_NAME} "${DOCKER_COMMON[@]}" claude-cli-env
