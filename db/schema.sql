@@ -560,3 +560,18 @@ JOIN users woman ON woman.id = m.woman_id AND woman.deleted_at IS NULL;
 -- The application should only expose real_name after BOTH accepted_by_man
 -- AND accepted_by_woman are TRUE, and should do so via a separate,
 -- access-controlled endpoint, not via this view.
+
+-- ---------------------------------------------------------------------------
+-- SEED DATA — questions (version 1)
+-- ---------------------------------------------------------------------------
+
+INSERT INTO questions (question_version, question_text, answer_type, min_value, max_value, weight, display_order)
+VALUES
+  (1, 'How adventurous are you? (1=cautious, 10=very adventurous)',         'scale', 1, 10, 1.5, 1),
+  (1, 'How important is alone time? (1=always social, 10=very introverted)','scale', 1, 10, 1.2, 2),
+  (1, 'How physically active are you? (1=sedentary, 10=very active)',        'scale', 1, 10, 1.0, 3),
+  (1, 'Importance of shared spiritual values? (1=none, 10=essential)',       'scale', 1, 10, 1.8, 4),
+  (1, 'How professionally ambitious? (1=relaxed, 10=highly driven)',         'scale', 1, 10, 1.0, 5),
+  (1, 'Preferred tidiness of living space? (1=relaxed, 10=very neat)',       'scale', 1, 10, 0.8, 6),
+  (1, 'How important is humor in a partner? (1=not, 10=essential)',          'scale', 1, 10, 1.2, 7),
+  (1, 'Importance of shared political views? (1=none, 10=very)',             'scale', 1, 10, 1.5, 8);

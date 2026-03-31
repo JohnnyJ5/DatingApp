@@ -52,13 +52,17 @@
 #include "../src/blossom.h"
 
 #include <libpq-fe.h>
+#include <pqxx/pqxx>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <mutex>
 #include <numeric>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -152,6 +156,64 @@ static std::string getenv_or(const char* name, const char* fallback)
 {
     const char* v = std::getenv(name);
     return v ? v : fallback;
+}
+
+// ── DBManager — pqxx connection for questionnaire endpoints ──────────────────
+// Assembles the connection string from the same env vars as the libpq block
+// in main(). A single global mutex serialises all pqxx transactions because
+// Crow is multithreaded and a single pqxx::connection is not thread-safe.
+
+static std::mutex pqxxMutex;
+
+class DBManager {
+public:
+    DBManager()
+        : conn_(
+            "host="     + getenv_or("DB_HOST",     "db")   +
+            " port="    + getenv_or("DB_PORT",     "5432") +
+            " dbname="  + getenv_or("DB_NAME",     "")     +
+            " user="    + getenv_or("DB_USER",     "")     +
+            " password="+ getenv_or("DB_PASSWORD", "")     +
+            " sslmode=" + getenv_or("DB_SSLMODE",  "prefer"))
+    {}
+
+    pqxx::connection& conn() { return conn_; }
+
+    // Set session-level RLS variables so policies can identify the caller.
+    void setSessionRole(pqxx::transaction_base& txn,
+                        const std::string& role,
+                        long long userId)
+    {
+        txn.exec("SET LOCAL app.current_role = " + txn.quote(role));
+        txn.exec("SET LOCAL app.current_user_id = " + txn.quote(std::to_string(userId)));
+    }
+
+private:
+    pqxx::connection conn_;
+};
+
+static DBManager* g_db = nullptr;   // initialised in main()
+
+// ── Scoring helper ────────────────────────────────────────────────────────────
+// Weighted Euclidean distance between two answer vectors; normalised to 0-100.
+// answerA / answerB: parallel vectors of numeric answers.
+// weights, mins, maxs: per-question metadata from the questions table.
+static int computeScore(const std::vector<double>& answerA,
+                        const std::vector<double>& answerB,
+                        const std::vector<double>& weights,
+                        const std::vector<double>& mins,
+                        const std::vector<double>& maxs)
+{
+    double dist = 0.0, maxDist = 0.0;
+    for (size_t i = 0; i < answerA.size(); ++i) {
+        double d   = answerA[i] - answerB[i];
+        double rng = maxs[i] - mins[i];
+        dist    += weights[i] * d * d;
+        maxDist += weights[i] * rng * rng;
+    }
+    if (maxDist <= 0.0) return 100;
+    double raw = 100.0 - std::sqrt(dist) / std::sqrt(maxDist) * 100.0;
+    return static_cast<int>(std::clamp(std::round(raw), 0.0, 100.0));
 }
 
 // Read a file from disk into a string (used to serve static HTML/CSS/JS).
@@ -267,6 +329,16 @@ int main()
 
     // Serialises all DB access — libpq connections are not thread-safe.
     std::mutex db_mutex;
+
+    // ── pqxx connection for questionnaire/questions/compatibility endpoints ──
+    try {
+        g_db = new DBManager();
+        std::cout << "pqxx connection established\n";
+    } catch (const std::exception& ex) {
+        std::cerr << "WARNING: pqxx connect failed: " << ex.what() << "\n";
+        std::cerr << "Questionnaire endpoints will return 503 until DB is available.\n";
+        g_db = nullptr;
+    }
 
     crow::SimpleApp app;
 
@@ -646,45 +718,350 @@ int main()
 
     // ── Compatibility Questionnaire ────────────────────────────────────────────
 
+    // GET /api/questions
+    // Returns all active questions for the current questionnaire version.
+    CROW_ROUTE(app, "/api/questions")([](){
+        if (!g_db) {
+            crow::json::wvalue e; e["error"] = "database unavailable";
+            return crow::response(503, e);
+        }
+        try {
+            std::lock_guard<std::mutex> lock(pqxxMutex);
+            pqxx::work txn(g_db->conn());
+            g_db->setSessionRole(txn, "scoring_service", 0);
+            auto rows = txn.exec(
+                "SELECT id, question_text, answer_type, min_value, max_value, "
+                "       weight, display_order, question_version "
+                "FROM questions WHERE is_active = TRUE ORDER BY display_order");
+            txn.commit();
+
+            crow::json::wvalue::list qs;
+            int version = 1;
+            for (const auto& r : rows) {
+                crow::json::wvalue q;
+                q["id"]              = r[0].as<long long>();
+                q["questionText"]    = r[1].as<std::string>();
+                q["answerType"]      = r[2].as<std::string>();
+                q["minValue"]        = r[3].as<int>();
+                q["maxValue"]        = r[4].as<int>();
+                q["weight"]          = r[5].as<double>();
+                q["displayOrder"]    = r[6].as<int>();
+                version              = r[7].as<int>();
+                qs.push_back(std::move(q));
+            }
+            crow::json::wvalue res;
+            res["questions"]       = std::move(qs);
+            res["questionVersion"] = version;
+            return crow::response(200, res);
+        } catch (const std::exception& ex) {
+            crow::json::wvalue e; e["error"] = ex.what();
+            return crow::response(500, e);
+        }
+    });
+
     // POST /api/questionnaire/:id
     // Body: { "answers": [ { "questionId": int, "answer": int/string }, ... ] }
-    // Processes questionnaire responses and updates the compatibility matrix.
+    // Stores answers, computes pair-wise compatibility scores, updates DB.
     CROW_ROUTE(app, "/api/questionnaire/<int>").methods(crow::HTTPMethod::POST)(
     [](const crow::request& req, int userId){
-        // TODO: validate answers against question schema
-        // TODO: compute pair-wise compatibility scores using a scoring model
-        //       (e.g. weighted Euclidean distance over answer vectors)
-        // TODO: persist scores; mark user's questionnaire as complete
-        // TODO: trigger re-run of any cached algorithm results for active events
-        crow::json::wvalue res;
-        res["userId"]  = userId;
-        res["message"] = "questionnaire submission — not yet wired to scoring engine";
-        return crow::response(200, res);
+        if (!g_db) {
+            crow::json::wvalue e; e["error"] = "database unavailable";
+            return crow::response(503, e);
+        }
+
+        auto body = crow::json::load(req.body);
+        if (!body || !body.has("answers") || body["answers"].t() != crow::json::type::List) {
+            crow::json::wvalue e; e["error"] = "body must be {\"answers\":[...]}";
+            return crow::response(400, e);
+        }
+
+        try {
+            std::lock_guard<std::mutex> lock(pqxxMutex);
+            pqxx::work txn(g_db->conn());
+            g_db->setSessionRole(txn, "scoring_service", static_cast<long long>(userId));
+
+            // Step 1: load active questions
+            auto qrows = txn.exec(
+                "SELECT id, answer_type, min_value, max_value, weight, question_version "
+                "FROM questions WHERE is_active = TRUE ORDER BY id");
+
+            // Build lookup: questionId -> {type, min, max, weight, version}
+            struct QMeta { std::string type; int min_v, max_v; double weight; int version; };
+            std::map<long long, QMeta> qmap;
+            int qversion = 1;
+            for (const auto& r : qrows) {
+                QMeta m{ r[1].as<std::string>(), r[2].as<int>(), r[3].as<int>(),
+                          r[4].as<double>(), r[5].as<int>() };
+                qmap[r[0].as<long long>()] = m;
+                qversion = m.version;
+            }
+
+            // Step 2: validate submitted answers
+            std::map<long long, double> answerMap;
+            const auto& answers = body["answers"];
+            for (const auto& a : answers) {
+                if (!a.has("questionId") || !a.has("answer")) {
+                    crow::json::wvalue e; e["error"] = "each answer must have questionId and answer";
+                    return crow::response(400, e);
+                }
+                long long qid = a["questionId"].i();
+                auto it = qmap.find(qid);
+                if (it == qmap.end()) {
+                    crow::json::wvalue e; e["error"] = "unknown questionId: " + std::to_string(qid);
+                    return crow::response(400, e);
+                }
+                double val = 0;
+                if (a["answer"].t() == crow::json::type::Number) {
+                    val = a["answer"].d();
+                } else {
+                    crow::json::wvalue e; e["error"] = "answer must be numeric for scale/integer types";
+                    return crow::response(400, e);
+                }
+                const auto& meta = it->second;
+                if (val < meta.min_v || val > meta.max_v) {
+                    crow::json::wvalue e;
+                    e["error"] = "answer out of range for questionId " + std::to_string(qid);
+                    return crow::response(400, e);
+                }
+                answerMap[qid] = val;
+            }
+
+            // Build JSONB string for the answers
+            std::string answersJson = "[";
+            bool first = true;
+            for (const auto& [qid, val] : answerMap) {
+                if (!first) answersJson += ",";
+                answersJson += "{\"questionId\":" + std::to_string(qid) +
+                               ",\"answer\":"     + std::to_string(val) + "}";
+                first = false;
+            }
+            answersJson += "]";
+
+            std::string userId_s   = std::to_string(userId);
+            std::string qversion_s = std::to_string(qversion);
+
+            // Step 3: mark old submission non-current
+            txn.exec_params(
+                "UPDATE questionnaire_submissions SET is_current=FALSE "
+                "WHERE user_id=$1 AND question_version=$2 AND is_current=TRUE",
+                userId, qversion);
+
+            // Step 4: insert new submission
+            auto srow = txn.exec_params1(
+                "INSERT INTO questionnaire_submissions "
+                "(user_id, question_version, answers, is_current) "
+                "VALUES ($1,$2,$3::jsonb,TRUE) RETURNING id",
+                userId, qversion, answersJson);
+            long long submissionId = srow[0].as<long long>();
+
+            // Step 5: mark questionnaire complete
+            txn.exec_params(
+                "UPDATE users SET has_completed_questionnaire=TRUE WHERE id=$1",
+                userId);
+
+            // Step 6: determine submitter gender
+            auto grow = txn.exec_params1(
+                "SELECT gender FROM users WHERE id=$1 AND deleted_at IS NULL",
+                userId);
+            std::string myGender = grow[0].as<std::string>();
+            std::string otherGender = (myGender == "male") ? "female" : "male";
+
+            // Fetch other-gender users with current submissions
+            auto others = txn.exec_params(
+                "SELECT u.id, qs.id AS sub_id, qs.answers "
+                "FROM users u "
+                "JOIN questionnaire_submissions qs "
+                "  ON qs.user_id = u.id AND qs.question_version = $1 AND qs.is_current = TRUE "
+                "WHERE u.gender = $2::gender_type AND u.deleted_at IS NULL",
+                qversion, otherGender);
+
+            // Build sorted question id/weight/min/max vectors for scoring
+            std::vector<long long> qids;
+            std::vector<double> weights, mins, maxs;
+            for (const auto& [qid, meta] : qmap) {
+                qids.push_back(qid);
+                weights.push_back(meta.weight);
+                mins.push_back(meta.min_v);
+                maxs.push_back(meta.max_v);
+            }
+
+            // My answer vector (ordered by qids)
+            std::vector<double> myAnswers;
+            for (auto qid : qids) {
+                auto it = answerMap.find(qid);
+                myAnswers.push_back(it != answerMap.end() ? it->second : 0.0);
+            }
+
+            // Step 7: compute and upsert scores for each other user
+            int scoresUpdated = 0;
+            for (const auto& other : others) {
+                long long otherId    = other[0].as<long long>();
+                long long otherSubId = other[1].as<long long>();
+                std::string otherAnswersJson = other[2].as<std::string>();
+
+                // Parse other user's answers from JSONB
+                // Simple extraction: find "questionId":N,"answer":V pairs
+                std::map<long long, double> otherAnswerMap;
+                {
+                    // Parse the JSONB array manually since we don't have a full JSON lib
+                    // Format: [{"questionId":1,"answer":7},...]
+                    std::string s = otherAnswersJson;
+                    size_t pos = 0;
+                    while ((pos = s.find("\"questionId\":", pos)) != std::string::npos) {
+                        pos += 13; // skip "questionId":
+                        size_t end = s.find_first_of(",}", pos);
+                        long long qid = std::stoll(s.substr(pos, end - pos));
+                        size_t apos = s.find("\"answer\":", end);
+                        if (apos == std::string::npos) break;
+                        apos += 9;
+                        size_t aend = s.find_first_of(",}", apos);
+                        double val = std::stod(s.substr(apos, aend - apos));
+                        otherAnswerMap[qid] = val;
+                        pos = aend;
+                    }
+                }
+
+                std::vector<double> otherAnswers;
+                for (auto qid : qids)
+                    otherAnswers.push_back(otherAnswerMap.count(qid) ? otherAnswerMap[qid] : 0.0);
+
+                int score = computeScore(myAnswers, otherAnswers, weights, mins, maxs);
+
+                long long manId, womanId, manSubId, womanSubId;
+                if (myGender == "male") {
+                    manId = userId; womanId = otherId;
+                    manSubId = submissionId; womanSubId = otherSubId;
+                } else {
+                    manId = otherId; womanId = userId;
+                    manSubId = otherSubId; womanSubId = submissionId;
+                }
+
+                txn.exec_params(
+                    "INSERT INTO compatibility_scores "
+                    "(man_id, woman_id, score, computed_at, man_submission_id, woman_submission_id) "
+                    "VALUES ($1,$2,$3::smallint,NOW(),$4,$5) "
+                    "ON CONFLICT (man_id, woman_id) DO UPDATE SET "
+                    "  score=EXCLUDED.score, computed_at=NOW(), "
+                    "  man_submission_id=EXCLUDED.man_submission_id, "
+                    "  woman_submission_id=EXCLUDED.woman_submission_id",
+                    manId, womanId, score, manSubId, womanSubId);
+                ++scoresUpdated;
+            }
+
+            txn.commit();
+
+            crow::json::wvalue res;
+            res["userId"]        = userId;
+            res["submissionId"]  = submissionId;
+            res["scoresUpdated"] = scoresUpdated;
+            res["message"]       = "Questionnaire submitted successfully";
+            return crow::response(200, res);
+
+        } catch (const std::exception& ex) {
+            crow::json::wvalue e; e["error"] = ex.what();
+            return crow::response(500, e);
+        }
     });
 
     // GET /api/compatibility
-    // Returns the full n×n compatibility score matrix (admin / debug only).
+    // Returns the full compatibility score matrix from the DB (admin / debug only).
+    // Falls back to hardcoded data if no scores exist yet.
     // In production this should be gated behind admin auth.
     CROW_ROUTE(app, "/api/compatibility")([](){
-        crow::json::wvalue res;
-        crow::json::wvalue::list matrix;
-        for (int m = 0; m < N; ++m) {
-            crow::json::wvalue row;
-            row["man"] = MEN[m];
-            crow::json::wvalue::list scores;
-            for (int w = 0; w < N; ++w) {
-                crow::json::wvalue entry;
-                entry["woman"] = WOMEN[w];
-                entry["score"] = COMPAT[m][w];
-                scores.push_back(std::move(entry));
+        if (!g_db) {
+            // Fallback: hardcoded matrix
+            crow::json::wvalue res;
+            crow::json::wvalue::list matrix;
+            for (int m = 0; m < N; ++m) {
+                crow::json::wvalue row;
+                row["man"] = MEN[m];
+                crow::json::wvalue::list scores;
+                for (int w = 0; w < N; ++w) {
+                    crow::json::wvalue entry;
+                    entry["woman"] = WOMEN[w];
+                    entry["score"] = COMPAT[m][w];
+                    scores.push_back(std::move(entry));
+                }
+                row["scores"] = std::move(scores);
+                matrix.push_back(std::move(row));
             }
-            row["scores"] = std::move(scores);
-            matrix.push_back(std::move(row));
+            res["matrix"]    = std::move(matrix);
+            res["threshold"] = THRESHOLD;
+            res["n"]         = N;
+            res["source"]    = "hardcoded";
+            return crow::response(200, res);
         }
-        res["matrix"]    = std::move(matrix);
-        res["threshold"] = THRESHOLD;
-        res["n"]         = N;
-        return crow::response(200, res);
+        try {
+            std::lock_guard<std::mutex> lock(pqxxMutex);
+            pqxx::work txn(g_db->conn());
+            g_db->setSessionRole(txn, "scoring_service", 0);
+            auto rows = txn.exec(
+                "SELECT m.alias, m.id, w.alias, w.id, cs.score "
+                "FROM compatibility_scores cs "
+                "JOIN users m ON m.id = cs.man_id "
+                "JOIN users w ON w.id = cs.woman_id "
+                "ORDER BY m.id, w.id");
+            txn.commit();
+
+            if (rows.empty()) {
+                // No live data yet — return hardcoded matrix
+                crow::json::wvalue res;
+                crow::json::wvalue::list matrix;
+                for (int mi = 0; mi < N; ++mi) {
+                    crow::json::wvalue row;
+                    row["man"] = MEN[mi];
+                    crow::json::wvalue::list scores;
+                    for (int wi = 0; wi < N; ++wi) {
+                        crow::json::wvalue entry;
+                        entry["woman"] = WOMEN[wi];
+                        entry["score"] = COMPAT[mi][wi];
+                        scores.push_back(std::move(entry));
+                    }
+                    row["scores"] = std::move(scores);
+                    matrix.push_back(std::move(row));
+                }
+                res["matrix"]    = std::move(matrix);
+                res["threshold"] = THRESHOLD;
+                res["n"]         = N;
+                res["source"]    = "hardcoded";
+                return crow::response(200, res);
+            }
+
+            // Group rows by man
+            std::map<long long, std::pair<std::string, std::vector<crow::json::wvalue>>> byMan;
+            std::vector<long long> manOrder;
+            for (const auto& r : rows) {
+                long long manId = r[1].as<long long>();
+                if (byMan.find(manId) == byMan.end()) {
+                    byMan[manId].first = r[0].as<std::string>();
+                    manOrder.push_back(manId);
+                }
+                crow::json::wvalue entry;
+                entry["woman"] = r[2].as<std::string>();
+                entry["score"] = r[4].as<int>();
+                byMan[manId].second.push_back(std::move(entry));
+            }
+
+            crow::json::wvalue::list matrix;
+            for (auto manId : manOrder) {
+                crow::json::wvalue row;
+                row["man"] = byMan[manId].first;
+                crow::json::wvalue::list scores;
+                for (auto& e : byMan[manId].second)
+                    scores.push_back(std::move(e));
+                row["scores"] = std::move(scores);
+                matrix.push_back(std::move(row));
+            }
+            crow::json::wvalue res;
+            res["matrix"]    = std::move(matrix);
+            res["threshold"] = THRESHOLD;
+            res["n"]         = static_cast<int>(manOrder.size());
+            res["source"]    = "database";
+            return crow::response(200, res);
+        } catch (const std::exception& ex) {
+            crow::json::wvalue e; e["error"] = ex.what();
+            return crow::response(500, e);
+        }
     });
 
     // ── Matching Algorithms ───────────────────────────────────────────────────

@@ -352,6 +352,30 @@
     .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
     .toast.success { border-color: rgba(16,185,129,0.4); color: #6ee7b7; }
     .toast.error   { border-color: rgba(239,68,68,0.4);  color: #fca5a5; }
+
+    /* ── Questionnaire ────────────────────────────────────── */
+    .question-block {
+      background: var(--glass); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 20px 22px; margin-bottom: 14px;
+    }
+    .question-block p { font-size: 0.9rem; color: var(--text); margin-bottom: 14px; line-height: 1.5; }
+    .slider-row { display: flex; align-items: center; gap: 12px; }
+    .slider-row input[type=range] {
+      flex: 1; accent-color: var(--pink); cursor: pointer;
+    }
+    .slider-val {
+      min-width: 32px; text-align: center; font-weight: 700; color: var(--pink); font-size: 1rem;
+    }
+    .scale-labels { display: flex; justify-content: space-between; margin-top: 6px; }
+    .scale-labels span { font-size: 0.72rem; color: var(--muted); }
+    .q-success {
+      text-align: center; padding: 32px;
+      background: rgba(16,185,129,0.08); border: 1px solid rgba(16,185,129,0.25);
+      border-radius: var(--radius);
+    }
+    .q-success .q-success-icon { font-size: 2.5rem; margin-bottom: 12px; }
+    .q-success h3 { font-size: 1.2rem; font-weight: 700; color: #6ee7b7; margin-bottom: 6px; }
+    .q-success p { font-size: 0.88rem; color: var(--muted); }
   </style>
 </head>
 <body>
@@ -363,6 +387,7 @@
     <a href="#">Profiles</a>
     <a href="#">Events</a>
     <a href="#">Matches</a>
+    <a href="#questionnaire">Questionnaire</a>
     <a href="#algorithms">Algorithms</a>
     <a href="#" class="btn-login" id="navAuthBtn" onclick="openAuthModal(); return false;">Sign In</a>
   </div>
@@ -387,6 +412,37 @@
   </div>
   <div class="profile-grid" id="profileGrid">
     <!-- Populated by JS -->
+  </div>
+</section>
+
+<!-- ── Questionnaire ──────────────────────────────────────────────────────────── -->
+<section class="section container" id="questionnaire">
+  <div class="section-header">
+    <h2>Compatibility Questionnaire</h2>
+    <p>Answer 8 questions so our algorithms can compute your match scores</p>
+  </div>
+
+  <div id="qEntryWrap" style="text-align:center;margin-bottom:24px">
+    <button class="btn btn-primary" onclick="loadQuestionnaire()">
+      ✦ Take the Questionnaire
+    </button>
+  </div>
+
+  <div id="qFormWrap" style="display:none;max-width:680px;margin:0 auto">
+    <div id="questionsList"></div>
+    <div style="text-align:center;margin-top:24px">
+      <button class="btn btn-primary" id="btnSubmitQ" onclick="submitQuestionnaire()">
+        Submit Answers
+      </button>
+    </div>
+  </div>
+
+  <div id="qSuccessWrap" style="display:none;max-width:480px;margin:0 auto">
+    <div class="q-success">
+      <div class="q-success-icon">💞</div>
+      <h3>Questionnaire Complete!</h3>
+      <p id="qSuccessMsg">Your compatibility scores have been computed.</p>
+    </div>
   </div>
 </section>
 
@@ -833,6 +889,99 @@ async function runAlgo(algo, btn) {
   } finally {
     btn.disabled = false;
     btn.innerHTML = original;
+  }
+}
+
+// ── Questionnaire ────────────────────────────────────────────────────────────
+// TODO: replace hardcoded 1 with JWT session value when auth is implemented
+let currentUserId = 1;
+let loadedQuestions = [];
+
+async function loadQuestionnaire() {
+  document.getElementById('qEntryWrap').style.display = 'none';
+  const listEl = document.getElementById('questionsList');
+  listEl.innerHTML = '<p style="color:var(--muted);text-align:center;padding:24px">Loading questions…</p>';
+  document.getElementById('qFormWrap').style.display = 'block';
+
+  try {
+    const res = await fetch('/api/questions');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    loadedQuestions = data.questions || [];
+    listEl.innerHTML = '';
+    loadedQuestions.forEach(q => listEl.appendChild(buildQuestionBlock(q)));
+  } catch (err) {
+    listEl.innerHTML = `<p style="color:#fca5a5;text-align:center;padding:24px">
+      Could not load questions: ${err.message}</p>`;
+  }
+}
+
+function buildQuestionBlock(q) {
+  const mid = Math.round((q.minValue + q.maxValue) / 2);
+  const div = document.createElement('div');
+  div.className = 'question-block';
+  div.dataset.questionId = q.id;
+
+  if (q.answerType === 'scale' || q.answerType === 'integer') {
+    div.innerHTML = `
+      <p>${q.displayOrder}. ${q.questionText}</p>
+      <div class="slider-row">
+        <input type="range" min="${q.minValue}" max="${q.maxValue}" value="${mid}"
+               id="q_${q.id}"
+               oninput="document.getElementById('v_${q.id}').textContent=this.value" />
+        <span class="slider-val" id="v_${q.id}">${mid}</span>
+      </div>
+      <div class="scale-labels">
+        <span>${q.minValue}</span><span>${q.maxValue}</span>
+      </div>`;
+  } else {
+    div.innerHTML = `
+      <p>${q.displayOrder}. ${q.questionText}</p>
+      <input type="text" id="q_${q.id}" style="width:100%;padding:10px 14px;border-radius:10px;
+             background:rgba(255,255,255,0.06);border:1px solid var(--border);
+             color:var(--text);font-size:0.92rem;outline:none;" placeholder="Your answer" />`;
+  }
+  return div;
+}
+
+async function submitQuestionnaire() {
+  const session = getSession();
+  if (session && session.userId) currentUserId = session.userId;
+
+  const answers = [];
+  for (const q of loadedQuestions) {
+    const el = document.getElementById('q_' + q.id);
+    if (!el) continue;
+    const val = (q.answerType === 'scale' || q.answerType === 'integer')
+      ? parseInt(el.value, 10)
+      : el.value.trim();
+    if (val === '' || val === null || isNaN(val)) {
+      showToast('Please answer all questions.', 'error'); return;
+    }
+    answers.push({ questionId: q.id, answer: val });
+  }
+
+  const btn = document.getElementById('btnSubmitQ');
+  btn.disabled = true; btn.textContent = 'Submitting…';
+
+  try {
+    const res = await fetch(`/api/questionnaire/${currentUserId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ answers }),
+    });
+    const data = await res.json();
+    if (!res.ok) { showToast(data.error || 'Submission failed.', 'error'); return; }
+
+    document.getElementById('qFormWrap').style.display = 'none';
+    document.getElementById('qSuccessMsg').textContent =
+      `${data.scoresUpdated} compatibility score(s) computed. Submission #${data.submissionId}.`;
+    document.getElementById('qSuccessWrap').style.display = 'block';
+    showToast('Questionnaire submitted!');
+  } catch (err) {
+    showToast('Network error: ' + err.message, 'error');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Submit Answers';
   }
 }
 
