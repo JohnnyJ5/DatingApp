@@ -39,9 +39,8 @@ else
             mkdir -p /app/.claude_config/.claude &&
             git clone ${DOTFILES_REPO} /app/.claude_config/dotfiles &&
             cd /app/.claude_config/dotfiles &&
-            ./install.sh
-        "
+            ./install.sh"
     fi
 
-    docker run --rm -it --name ${CONTAINER_NAME} "${DOCKER_COMMON[@]}" claude-cli-env bash -c "source /app/.claude_config/dotfiles/.bashrc"
+    docker run --rm -it --name ${CONTAINER_NAME} "${DOCKER_COMMON[@]}" claude-cli-env bash
 fi
