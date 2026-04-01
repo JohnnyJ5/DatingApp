@@ -19,6 +19,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     nodejs \
     npm \
     python3 \
+    jq \
     sudo \
     && rm -rf /var/lib/apt/lists/*
 
