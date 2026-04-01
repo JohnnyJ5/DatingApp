@@ -64,30 +64,30 @@ bool pgGetBool(PGresult* res, int row, int col) {
 // ── Construction / Destruction ────────────────────────────────────────────────
 
 DBManager::DBManager(std::string_view connStr, int poolSize)
-    : connStr_(connStr)
+    : d_connStr(connStr)
 {
     for (int i = 0; i < poolSize; ++i) {
-        PGconn* conn = PQconnectdb(connStr_.c_str());
+        PGconn* conn = PQconnectdb(d_connStr.c_str());
         if (PQstatus(conn) != CONNECTION_OK) {
             std::cerr << "DBManager: pool[" << i << "] connect failed: "
                       << PQerrorMessage(conn) << "\n";
             PQfinish(conn);
             continue;
         }
-        pool_.push_back(conn);
-        available_.push(conn);
+        d_pool.push_back(conn);
+        d_available.push(conn);
     }
-    if (pool_.empty()) {
+    if (d_pool.empty()) {
         std::cerr << "DBManager: WARNING — no DB connections available; "
                      "all database endpoints will return errors.\n";
     } else {
-        std::cout << "DBManager: pool ready (" << pool_.size() << " connection(s))\n";
+        std::cout << "DBManager: pool ready (" << d_pool.size() << " connection(s))\n";
     }
 }
 
 DBManager::~DBManager() {
-    // Drain the available queue; pool_ owns the canonical pointer list.
-    for (PGconn* conn : pool_) {
+    // Drain the available queue; d_pool owns the canonical pointer list.
+    for (PGconn* conn : d_pool) {
         PQfinish(conn);
     }
 }
@@ -95,20 +95,20 @@ DBManager::~DBManager() {
 // ── Pool management ───────────────────────────────────────────────────────────
 
 DBManager::ConnGuard DBManager::acquire() {
-    std::unique_lock<std::mutex> lock(poolMutex_);
-    const bool got = poolCv_.wait_for(lock, std::chrono::seconds(5),
-                                      [this]{ return !available_.empty(); });
+    std::unique_lock<std::mutex> lock(d_poolMutex);
+    const bool got = d_poolCv.wait_for(lock, std::chrono::seconds(5),
+                                       [this]{ return !d_available.empty(); });
     if (!got) {
         throw std::runtime_error("DB connection pool exhausted (timeout)");
     }
-    PGconn* conn = available_.front();
-    available_.pop();
+    PGconn* conn = d_available.front();
+    d_available.pop();
 
     // Reconnect if the connection has been lost.
     if (PQstatus(conn) != CONNECTION_OK) {
         PQreset(conn);
         if (PQstatus(conn) != CONNECTION_OK) {
-            available_.push(conn);   // put it back so the pool size stays correct
+            d_available.push(conn);   // put it back so the pool size stays correct
             throw std::runtime_error("DB connection reset failed");
         }
     }
@@ -117,10 +117,10 @@ DBManager::ConnGuard DBManager::acquire() {
 
 void DBManager::release(PGconn* conn) noexcept {
     {
-        std::lock_guard<std::mutex> lock(poolMutex_);
-        available_.push(conn);
+        std::lock_guard<std::mutex> lock(d_poolMutex);
+        d_available.push(conn);
     }
-    poolCv_.notify_one();
+    d_poolCv.notify_one();
 }
 
 // ── SQLSTATE mapping ──────────────────────────────────────────────────────────

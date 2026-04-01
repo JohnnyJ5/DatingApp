@@ -202,9 +202,9 @@ private:
     // Maps SQLSTATE string → DbErrc for uniform error reporting.
     static DbErrc mapSqlState(const char* sqlstate) noexcept;
 
-    std::vector<PGconn*>    pool_;
-    std::queue<PGconn*>     available_;
-    std::mutex              poolMutex_;
-    std::condition_variable poolCv_;
-    std::string             connStr_;
+    std::vector<PGconn*>    d_pool;
+    std::queue<PGconn*>     d_available;
+    std::mutex              d_poolMutex;
+    std::condition_variable d_poolCv;
+    std::string             d_connStr;
 };
