@@ -139,6 +139,100 @@ static void test_no_man_can_do_better() {
     check("proposer-optimal: all men matched", allMatched);
 }
 
+// n=1: trivial case — one man, one woman, always paired.
+static void test_n1_trivial() {
+    GaleShapley gs({{0}}, {{0}});
+    gs.run();
+    check("n=1: M0 matched to W0", gs.getMatchingA()[0] == 0);
+    check("n=1: W0 matched to M0", gs.getMatchingB()[0] == 0);
+    check("n=1: stable",           gs.isStable());
+}
+
+// Symmetric top preferences: M_i ranks W_i first, W_i ranks M_i first.
+// Every first proposal is accepted immediately; result must be the identity.
+static void test_symmetric_top_preferences_identity() {
+    std::vector<std::vector<int>> menPrefs = {
+        {0, 1, 2, 3},
+        {1, 0, 2, 3},
+        {2, 0, 1, 3},
+        {3, 0, 1, 2},
+    };
+    std::vector<std::vector<int>> womenPrefs = {
+        {0, 1, 2, 3},
+        {1, 0, 2, 3},
+        {2, 0, 1, 3},
+        {3, 0, 1, 2},
+    };
+    GaleShapley gs(menPrefs, womenPrefs);
+    gs.run();
+    const auto& m = gs.getMatchingA();
+    check("symmetric: M0↔W0", m[0] == 0);
+    check("symmetric: M1↔W1", m[1] == 1);
+    check("symmetric: M2↔W2", m[2] == 2);
+    check("symmetric: M3↔W3", m[3] == 3);
+    check("symmetric: stable", gs.isStable());
+}
+
+// Receiver-pessimality: men-proposing GS gives women their *worst* stable partner.
+//
+// Two stable matchings exist:
+//   S1 (men-optimal):   M0↔W0, M1↔W1
+//   S2 (women-optimal): M0↔W1, M1↔W0
+//
+// M0: W0>W1   M1: W1>W0
+// W0: M1>M0   W1: M0>M1
+//
+// GS (men propose) must yield S1. W0 ends up with M0 — her *least* preferred
+// stable partner — confirming the Rural Hospitals / receiver-pessimality theorem.
+static void test_receiver_gets_worst_stable_partner() {
+    std::vector<std::vector<int>> menPrefs   = {{0, 1}, {1, 0}};
+    std::vector<std::vector<int>> womenPrefs = {{1, 0}, {0, 1}};
+    GaleShapley gs(menPrefs, womenPrefs);
+    gs.run();
+    check("receiver-pessimal: M0↔W0",                     gs.getMatchingA()[0] == 0);
+    check("receiver-pessimal: M1↔W1",                     gs.getMatchingA()[1] == 1);
+    check("receiver-pessimal: W0 holds M0 (worst stable)", gs.getMatchingB()[0] == 0);
+    check("receiver-pessimal: stable",                     gs.isStable());
+}
+
+// Cascading proposals: 5 men all have identical rankings (W0>W1>…>W4).
+// Each woman W_i uniquely prefers M_i first. W0 accepts M0 immediately;
+// M1 cascades to W1 (his 2nd choice), M2 to W2, and so on.
+// The diagonal matching is the unique stable outcome.
+static void test_all_men_same_prefs_cascading() {
+    const int n = 5;
+    std::vector<std::vector<int>> menPrefs(n, {0, 1, 2, 3, 4});
+    std::vector<std::vector<int>> womenPrefs(n);
+    for (int w = 0; w < n; ++w) {
+        womenPrefs[w].push_back(w);  // prefer matching man first
+        for (int m = 0; m < n; ++m)
+            if (m != w) womenPrefs[w].push_back(m);
+    }
+    GaleShapley gs(menPrefs, womenPrefs);
+    gs.run();
+    const auto& m = gs.getMatchingA();
+    bool allDiagonal = true;
+    for (int i = 0; i < n; ++i) allDiagonal = allDiagonal && (m[i] == i);
+    check("cascading: each M_i matched to W_i", allDiagonal);
+    check("cascading: stable",                  gs.isStable());
+}
+
+// matchA and matchB must be mutual inverses: if matchA[i]==j then matchB[j]==i.
+// Tests internal consistency between the two views of the same matching.
+static void test_matchingA_matchingB_consistency() {
+    std::vector<std::vector<int>> menPrefs   = {{1, 0, 2}, {0, 2, 1}, {2, 1, 0}};
+    std::vector<std::vector<int>> womenPrefs = {{2, 0, 1}, {0, 1, 2}, {1, 2, 0}};
+    GaleShapley gs(menPrefs, womenPrefs);
+    gs.run();
+    const auto& a = gs.getMatchingA();
+    const auto& b = gs.getMatchingB();
+    bool consistent = true;
+    for (int i = 0; i < 3; ++i)
+        if (a[i] != -1 && b[a[i]] != i) consistent = false;
+    check("A-B consistency: matchB[matchA[i]]==i for all i", consistent);
+    check("A-B consistency: stable",                         gs.isStable());
+}
+
 int main() {
     test_two_couples();
     test_three_couples_classic();
@@ -146,6 +240,11 @@ int main() {
     test_all_men_prefer_same_woman();
     test_rerun_is_idempotent();
     test_no_man_can_do_better();
+    test_n1_trivial();
+    test_symmetric_top_preferences_identity();
+    test_receiver_gets_worst_stable_partner();
+    test_all_men_same_prefs_cascading();
+    test_matchingA_matchingB_consistency();
     if (failures > 0)
         std::cout << failures << " Gale-Shapley test(s) FAILED.\n";
     else

@@ -132,6 +132,67 @@ static void test_rerun_idempotent() {
     check("re-run: consistent",      true);
 }
 
+// n=1: single man, single woman — trivially assigned, score equals the one entry.
+static void test_n1_trivial() {
+    Hungarian h({{42}});
+    h.solve();
+    check("n=1: score 42",  h.getMaxScore() == 42);
+    check("n=1: M0→W0",     h.getAssignment()[0] == 0);
+}
+
+// Anti-diagonal beats diagonal: the off-diagonal assignment (cross-swap) is optimal.
+// Greedy (pick max in each row left-to-right) gives score 1+1=2;
+// optimal gives score 10+10=20.
+static void test_antidiagonal_optimal() {
+    std::vector<std::vector<int>> compat = {{1, 10}, {10, 1}};
+    Hungarian h(compat);
+    h.solve();
+    check("antidiag: score 20",  h.getMaxScore() == 20);
+    check("antidiag: M0→W1",     h.getAssignment()[0] == 1);
+    check("antidiag: M1→W0",     h.getAssignment()[1] == 0);
+    assertScoreConsistent(compat, h);
+    check("antidiag: consistent", true);
+}
+
+// All-zero matrix: any perfect assignment is equally optimal; score must be 0
+// and the returned assignment must be a valid permutation.
+static void test_all_zeros() {
+    const int n = 3;
+    std::vector<std::vector<int>> compat(n, std::vector<int>(n, 0));
+    Hungarian h(compat);
+    h.solve();
+    check("all-zeros: score 0", h.getMaxScore() == 0);
+    const auto& a = h.getAssignment();
+    std::vector<bool> used(n, false);
+    bool validPerm = true;
+    for (int i = 0; i < n; ++i) {
+        if (a[i] < 0 || a[i] >= n || used[a[i]]) { validPerm = false; break; }
+        used[a[i]] = true;
+    }
+    check("all-zeros: valid permutation", validPerm);
+}
+
+// 5×5 anti-diagonal: the single high-value entry in each row lies on the
+// anti-diagonal. A greedy row-scan would pick column 0 for every man and
+// collide; Hungarian must find the unique valid anti-diagonal assignment.
+// Optimal: M0→W4, M1→W3, M2→W2, M3→W1, M4→W0, total = 5×9 = 45.
+static void test_5couples_antidiagonal() {
+    std::vector<std::vector<int>> compat = {
+        {1, 1, 1, 1, 9},
+        {1, 1, 1, 9, 1},
+        {1, 1, 9, 1, 1},
+        {1, 9, 1, 1, 1},
+        {9, 1, 1, 1, 1},
+    };
+    Hungarian h(compat);
+    h.solve();
+    check("5-antidiag: score 45",   h.getMaxScore() == 45);
+    check("5-antidiag: M0→W4",      h.getAssignment()[0] == 4);
+    check("5-antidiag: M4→W0",      h.getAssignment()[4] == 0);
+    assertScoreConsistent(compat, h);
+    check("5-antidiag: consistent", true);
+}
+
 int main() {
     test_two_couples_clear_winner();
     test_three_couples_diagonal();
@@ -139,6 +200,10 @@ int main() {
     test_four_couples();
     test_uniform_compatibility();
     test_rerun_idempotent();
+    test_n1_trivial();
+    test_antidiagonal_optimal();
+    test_all_zeros();
+    test_5couples_antidiagonal();
     if (failures > 0)
         std::cout << failures << " Hungarian test(s) FAILED.\n";
     else

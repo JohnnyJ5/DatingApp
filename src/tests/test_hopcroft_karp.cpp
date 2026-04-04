@@ -114,6 +114,48 @@ static void test_augmenting_path_needed() {
     check("augmenting: 2 couples", hk.maxMatching() == 2);
 }
 
+// Single compatible pair: 1 man, 1 woman — trivially matched.
+static void test_single_pair() {
+    HopcroftKarp hk(1, 1);
+    hk.addCompatiblePair(0, 0);
+    check("single-pair: 1 couple",      hk.maxMatching() == 1);
+    check("single-pair: M0 matched",    hk.getMatching()[0] == 0);
+}
+
+// More men than women: 5 men all compatible with 3 women — cap is 3.
+static void test_more_men_than_women() {
+    HopcroftKarp hk(5, 3);
+    for (int m = 0; m < 5; ++m)
+        for (int w = 0; w < 3; ++w)
+            hk.addCompatiblePair(m, w);
+    int couples = hk.maxMatching();
+    check("more-men: capped at 3 couples", couples == 3);
+    assertValidMatching(hk.getMatching(), 3);
+    check("more-men: valid assignment",    true);
+}
+
+// Star bottleneck: all 4 men are only compatible with W0 — maximum is 1.
+// Any algorithm that double-assigns a woman must fail this test.
+static void test_star_bottleneck_single_woman() {
+    HopcroftKarp hk(4, 1);
+    for (int m = 0; m < 4; ++m)
+        hk.addCompatiblePair(m, 0);
+    check("star-bottleneck: only 1 couple", hk.maxMatching() == 1);
+}
+
+// Calling maxMatching() a second time must return the same value.
+// Re-entrant correctness: the algorithm must reinitialise internal state.
+static void test_rerun_same_result() {
+    HopcroftKarp hk(3, 3);
+    hk.addCompatiblePair(0, 0);
+    hk.addCompatiblePair(1, 1);
+    hk.addCompatiblePair(2, 2);
+    int first  = hk.maxMatching();
+    int second = hk.maxMatching();
+    check("rerun: same count both times", first == second);
+    check("rerun: correct count (3)",     second == 3);
+}
+
 int main() {
     test_perfect_matching();
     test_no_compatible_pairs();
@@ -121,6 +163,10 @@ int main() {
     test_fully_compatible_pool();
     test_more_women_than_men();
     test_augmenting_path_needed();
+    test_single_pair();
+    test_more_men_than_women();
+    test_star_bottleneck_single_woman();
+    test_rerun_same_result();
     if (failures > 0)
         std::cout << failures << " Hopcroft-Karp test(s) FAILED.\n";
     else

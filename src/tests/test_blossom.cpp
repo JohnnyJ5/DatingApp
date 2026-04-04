@@ -125,6 +125,68 @@ static void test_single_compatible_pair() {
     check("single pair: 1 couple", b.maxMatching() == 1);
 }
 
+// Single vertex: no edges possible, no match possible.
+static void test_n1_single_vertex_no_match() {
+    Blossom b(1);
+    check("n=1: 0 matches",           b.maxMatching() == 0);
+    check("n=1: vertex unmatched",    b.getMatching()[0] == -1);
+}
+
+// Two disjoint pairs (0-1) and (2-3) share no vertices — both must be matched.
+// Tests that the algorithm handles disconnected components correctly.
+static void test_two_disjoint_pairs() {
+    Blossom b(4);
+    b.addCompatiblePair(0, 1);
+    b.addCompatiblePair(2, 3);
+    int couples = b.maxMatching();
+    check("disjoint-pairs: 2 matches",   couples == 2);
+    assertValidMatching(b.getMatching());
+    const auto& m = b.getMatching();
+    check("disjoint-pairs: 0↔1",         m[0] == 1 && m[1] == 0);
+    check("disjoint-pairs: 2↔3",         m[2] == 3 && m[3] == 2);
+}
+
+// Triangle (3-cycle): the canonical odd-cycle case that requires Edmonds'
+// blossom contraction. Maximum matching = 1 (one vertex must be left out).
+// An algorithm that mishandles odd cycles could incorrectly return 2 or loop.
+static void test_triangle_odd_cycle() {
+    Blossom b(3);
+    b.addCompatiblePair(0, 1);
+    b.addCompatiblePair(1, 2);
+    b.addCompatiblePair(0, 2);
+    int couples = b.maxMatching();
+    check("triangle: 1 match (odd cycle)", couples == 1);
+    assertValidMatching(b.getMatching());
+}
+
+// Pentagon (5-cycle): odd cycle of length 5. Maximum matching = 2
+// (two non-adjacent edges can be selected, one vertex remains unmatched).
+static void test_pentagon_odd_cycle() {
+    Blossom b(5);
+    b.addCompatiblePair(0, 1);
+    b.addCompatiblePair(1, 2);
+    b.addCompatiblePair(2, 3);
+    b.addCompatiblePair(3, 4);
+    b.addCompatiblePair(4, 0);
+    int couples = b.maxMatching();
+    check("pentagon: 2 matches",  couples == 2);
+    assertValidMatching(b.getMatching());
+}
+
+// Odd-length path (0-1-2-3-4): 5 vertices in a line.
+// Optimal is to match (0,1) and (2,3), leaving vertex 4 unmatched.
+// Maximum matching = 2, not 3 — there is no perfect matching on 5 vertices.
+static void test_path_graph_odd_length() {
+    Blossom b(5);
+    b.addCompatiblePair(0, 1);
+    b.addCompatiblePair(1, 2);
+    b.addCompatiblePair(2, 3);
+    b.addCompatiblePair(3, 4);
+    int couples = b.maxMatching();
+    check("odd-path: 2 matches",  couples == 2);
+    assertValidMatching(b.getMatching());
+}
+
 int main() {
     test_two_couples_perfect();
     test_no_compatible_pairs();
@@ -133,6 +195,11 @@ int main() {
     test_more_women_than_men();
     test_augmenting_path_required();
     test_single_compatible_pair();
+    test_n1_single_vertex_no_match();
+    test_two_disjoint_pairs();
+    test_triangle_odd_cycle();
+    test_pentagon_odd_cycle();
+    test_path_graph_odd_length();
     if (failures > 0)
         std::cout << failures << " Blossom test(s) FAILED.\n";
     else
