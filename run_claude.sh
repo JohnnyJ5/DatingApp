@@ -41,22 +41,23 @@ else
     echo "Starting a new '${CONTAINER_NAME}' container..."
 
     if [ ! -f "$HOME/.ssh/claude_github" ]; then
-        echo "SSH key not found at ~/.ssh/claude_github — generating a new ed25519 key..."
-        mkdir -p "$HOME/.ssh"
-        chmod 700 "$HOME/.ssh"
-        ssh-keygen -t ed25519 -C "claude-github" -f "$HOME/.ssh/claude_github" -N ""
-        echo ""
-        echo "============================================================"
-        echo "New SSH public key (add this to GitHub -> Settings -> SSH keys):"
-        echo "============================================================"
-        cat "$HOME/.ssh/claude_github.pub"
-        echo "============================================================"
-        echo ""
-        echo "After adding the key to GitHub, re-run this script."
-        exit 0
+        echo "ERROR: SSH key not found at ~/.ssh/claude_github"
+        exit 1
     fi
 
     mkdir -p .claude_workspace_env/.ssh
+
+    if [ ! -f ".claude_workspace_env/.ssh/config" ]; then
+        cat > .claude_workspace_env/.ssh/config <<'EOF'
+Host github.com
+    HostName github.com
+    User git
+    IdentityFile ~/.ssh/id_ed25519
+    IdentitiesOnly yes
+    StrictHostKeyChecking no
+EOF
+        chmod 600 .claude_workspace_env/.ssh/config
+    fi
 
     docker build -t claude-cli-env -f Dockerfile.claude .
 
